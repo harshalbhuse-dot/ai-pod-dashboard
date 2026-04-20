@@ -1,2 +1,7 @@
-ai_pod_report.html  
-gen_log.txt  
+.venv/
+__pycache__/
+*.pyc
+gen_log.txt
+server.log
+*.csv
+*.xlsx

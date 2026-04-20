@@ -130,15 +130,21 @@ HTML = r"""
 
 <!-- NAV TABS -->
 <nav class="bg-white border-b shadow-sm">
-  <div class="max-w-7xl mx-auto px-6 flex gap-0">
+  <div class="max-w-7xl mx-auto px-6 flex items-center gap-0">
     <a href="/" class="px-5 py-3 text-sm font-semibold text-blue-600 border-b-2 border-blue-600">
       &#x1F4CA; Summary
     </a>
-    <a href="/detail" class="px-5 py-3 text-sm font-semibold text-gray-500 hover:text-blue-600 border-b-2 border-transparent hover:border-blue-400 transition">
-      &#x1F50D; Driver Lookup
-    </a>
+    <span id="nav_lookup"></span>
   </div>
 </nav>
+<script>
+(function(){
+  const isLocal = ['localhost','127.0.0.1'].includes(location.hostname);
+  document.getElementById('nav_lookup').innerHTML = isLocal
+    ? `<a href="/detail" class="px-5 py-3 text-sm font-semibold text-gray-500 hover:text-blue-600 border-b-2 border-transparent hover:border-blue-400 transition">&#x1F50D; Driver Lookup</a>`
+    : `<span class="px-5 py-3 text-sm font-semibold text-gray-300 cursor-default" title="Driver Lookup requires the local server. Run: uvicorn main:app">&#x1F50D; Driver Lookup (local only)</span>`;
+})();
+</script>
 
 <!-- CONTROLS -->
 <div class="bg-white border-b shadow-sm px-6 py-4">
