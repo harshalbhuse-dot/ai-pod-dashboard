@@ -1,0 +1,288 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>Driver POD Lookup — AI POD Dashboard</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<style>
+  .pill{cursor:pointer;border-radius:9999px;padding:5px 14px;font-size:.8rem;
+        font-weight:600;border:2px solid #0053e2;transition:all .15s;white-space:nowrap}
+  .pill.active{background:#0053e2;color:#fff}
+  .pill:not(.active){background:#fff;color:#0053e2}
+  input[type=date]{border:1px solid #d1d5db;border-radius:6px;padding:4px 8px;
+                   font-size:.8rem;cursor:pointer}
+  input[type=date]:focus{outline:none;border-color:#0053e2}
+  .badge-ok{display:inline-flex;align-items:center;gap:4px;padding:3px 12px;
+            border-radius:9999px;font-size:.75rem;font-weight:700;
+            background:#dcfce7;color:#166534;border:1.5px solid #22c55e}
+  .badge-bad{display:inline-flex;align-items:center;gap:4px;padding:3px 12px;
+             border-radius:9999px;font-size:.75rem;font-weight:700;
+             background:#fee2e2;color:#991b1b;border:1.5px solid #ef4444}
+  .badge-null{display:inline-flex;align-items:center;gap:4px;padding:3px 12px;
+              border-radius:9999px;font-size:.75rem;font-weight:700;
+              background:#f3f4f6;color:#6b7280;border:1.5px solid #d1d5db}
+  th{background:#0053e2;color:#fff;font-size:.72rem;font-weight:700;
+     text-transform:uppercase;padding:10px 14px;white-space:nowrap}
+  th:first-child{border-radius:8px 0 0 0}
+  th:last-child {border-radius:0 8px 0 0}
+</style>
+</head>
+<body class="bg-gray-50 min-h-screen text-gray-800">
+
+<!-- HEADER -->
+<header class="px-6 py-4 shadow text-white" style="background:#0053e2">
+  <div class="max-w-7xl mx-auto flex items-center gap-3">
+    <div>
+      <h1 class="text-lg font-bold">AI POD Verification Dashboard</h1>
+      <p class="text-blue-200 text-xs">Driver-level Proof of Delivery analysis &bull; LMD Analytics</p>
+    </div>
+  </div>
+</header>
+
+<!-- NAV TABS -->
+<nav class="bg-white border-b shadow-sm">
+  <div class="max-w-7xl mx-auto px-6 flex gap-0">
+    <a href="/" class="px-5 py-3 text-sm font-semibold text-gray-500 hover:text-blue-600 border-b-2 border-transparent hover:border-blue-400 transition">
+      &#x1F4CA; Summary
+    </a>
+    <a href="/detail" class="px-5 py-3 text-sm font-semibold text-blue-600 border-b-2 border-blue-600">
+      &#x1F50D; Driver Lookup
+    </a>
+  </div>
+</nav>
+
+<!-- CONTROLS -->
+<div class="bg-white border-b shadow-sm px-6 py-4">
+  <div class="max-w-7xl mx-auto space-y-3">
+
+    <!-- Driver ID input -->
+    <div class="flex items-center gap-3 flex-wrap">
+      <label class="text-xs font-bold text-gray-500 uppercase tracking-wide">Driver ID</label>
+      <input id="driver_id" type="text" placeholder="Enter Driver ID and press Search..."
+        class="border-2 rounded-lg px-3 py-2 text-sm w-80 focus:outline-none focus:border-blue-500"
+        onkeydown="if(event.key==='Enter') search()" />
+      <button onclick="search()"
+        class="px-5 py-2 text-sm font-bold text-white rounded-lg hover:opacity-90 transition"
+        style="background:#0053e2">Search</button>
+      <button onclick="clearSearch()"
+        class="px-4 py-2 text-sm font-semibold text-gray-500 border rounded-lg hover:bg-gray-50">Clear</button>
+    </div>
+
+    <!-- Date filters -->
+    <div class="flex items-center gap-x-6 gap-y-2 flex-wrap">
+      <div class="flex items-center gap-2 flex-wrap">
+        <span class="text-xs font-bold text-gray-500 uppercase tracking-wide">Time Window</span>
+        <button class="pill active" onclick="setPreset(7)"  id="pill_7" >Last 7 days</button>
+        <button class="pill"        onclick="setPreset(14)" id="pill_14">Last 14 days</button>
+        <button class="pill"        onclick="setPreset(30)" id="pill_30">Last 30 days</button>
+        <button class="pill"        onclick="setPreset(90)" id="pill_90">Last 90 days</button>
+      </div>
+      <div class="flex items-center gap-2">
+        <span class="text-xs font-bold text-gray-500 uppercase tracking-wide">Custom Range</span>
+        <input type="date" id="dt_from" onchange="setCustom()" />
+        <span class="text-xs text-gray-400">to</span>
+        <input type="date" id="dt_to"   onchange="setCustom()" />
+        <button onclick="clearCustom()"
+          class="text-xs font-semibold text-blue-600 hover:underline">Clear</button>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<!-- MAIN -->
+<main class="max-w-7xl mx-auto px-6 py-6">
+
+  <!-- Empty / loading / results -->
+  <div id="state_empty" class="text-center py-24 text-gray-400">
+    <div class="text-5xl mb-4">&#x1F50D;</div>
+    <p class="text-lg font-semibold text-gray-500">Enter a Driver ID above to load their POD records</p>
+    <p class="text-sm mt-1">Searches run live against BigQuery</p>
+  </div>
+
+  <div id="state_loading" class="hidden text-center py-24 text-gray-400">
+    <div class="animate-spin text-5xl mb-4">&#x231B;</div>
+    <p class="text-sm">Querying BigQuery&hellip;</p>
+  </div>
+
+  <div id="state_empty_result" class="hidden text-center py-24 text-gray-400">
+    <div class="text-5xl mb-4">&#x1F4ED;</div>
+    <p class="text-lg font-semibold text-gray-500">No records found</p>
+    <p class="text-sm mt-1" id="empty_msg"></p>
+  </div>
+
+  <!-- Results -->
+  <div id="state_results" class="hidden">
+    <div class="flex items-center justify-between mb-4">
+      <h2 class="text-base font-bold text-gray-700">
+        &#x1F4CB; Detailed POD View &mdash; <span id="range_label"></span>
+      </h2>
+      <span class="text-sm text-gray-400" id="rec_count"></span>
+    </div>
+    <div class="bg-white rounded-xl shadow overflow-hidden">
+      <div class="overflow-x-auto">
+        <table class="w-full">
+          <thead>
+            <tr>
+              <th class="text-left">Driver ID</th>
+              <th class="text-left">Sales Order #</th>
+              <th class="text-left">PO Number</th>
+              <th class="text-left">Date</th>
+              <th class="text-center">POD Image</th>
+              <th class="text-center">AI Result</th>
+              <th class="text-left">AI Insight</th>
+              <th class="text-center">Missing Order</th>
+            </tr>
+          </thead>
+          <tbody id="tbl_body"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+</main>
+
+<footer class="text-center text-xs text-gray-400 py-6">
+  AI POD Verification Dashboard &bull; LMD Analytics &bull;
+  <code>wmt-driver-insights.Chirag_dx.AI_POD_VERIFICATION</code>
+</footer>
+
+<script>
+// ── State ───────────────────────────────────────────────────────────
+let activePreset = 7;
+let customFrom   = null;
+let customTo     = null;
+
+// ── Date helpers ────────────────────────────────────────────────────────
+function today() { return new Date().toISOString().slice(0, 10); }
+function daysAgo(n) {
+  const d = new Date(); d.setDate(d.getDate() - n);
+  return d.toISOString().slice(0, 10);
+}
+function fmtDate(iso) {
+  if (!iso) return '—';
+  const d = new Date(iso + 'T00:00:00');
+  return d.toLocaleDateString('en-US', { month:'short', day:'numeric', year:'numeric' });
+}
+
+function getDateRange() {
+  if (customFrom && customTo)
+    return { from: customFrom, to: customTo,
+             label: `${fmtDate(customFrom)} – ${fmtDate(customTo)}` };
+  const to   = today();
+  const from = daysAgo(activePreset);
+  const labelMap = {7:'Last 7 Days',14:'Last 14 Days',30:'Last 30 Days',90:'Last 90 Days'};
+  return { from, to, label: labelMap[activePreset] };
+}
+
+// ── Pill / date controls ──────────────────────────────────────────────────
+function setPreset(n) {
+  activePreset = n; customFrom = customTo = null;
+  document.getElementById('dt_from').value = '';
+  document.getElementById('dt_to').value   = '';
+  [7,14,30,90].forEach(d =>
+    document.getElementById('pill_'+d).classList.toggle('active', d === n));
+}
+function setCustom() {
+  const f = document.getElementById('dt_from').value;
+  const t = document.getElementById('dt_to').value;
+  if (!f || !t) return;
+  customFrom = f; customTo = t;
+  [7,14,30,90].forEach(d =>
+    document.getElementById('pill_'+d).classList.remove('active'));
+}
+function clearCustom() {
+  document.getElementById('dt_from').value = '';
+  document.getElementById('dt_to').value   = '';
+  setPreset(7);
+}
+
+// ── UI state helpers ─────────────────────────────────────────────────────
+const STATES = ['empty','loading','empty_result','results'];
+function showState(s) {
+  STATES.forEach(k =>
+    document.getElementById('state_'+k).classList.toggle('hidden', k !== s));
+}
+
+// ── Row rendering helpers ──────────────────────────────────────────────────
+function resultBadge(result) {
+  if (!result) return '<span class="badge-null">&mdash;</span>';
+  if (result.toLowerCase() === 'acceptable')
+    return '<span class="badge-ok">&#x2705; Acceptable</span>';
+  return '<span class="badge-bad">&#x274C; Unacceptable</span>';
+}
+
+function aiInsight(row) {
+  if (row.suspected_fraud   === 'yes') return 'Suspected Fraud';
+  if (row.inside_vehicle    === 'yes') return 'Inside Vehicle';
+  if (row.profanity         === 'yes') return 'Profanity';
+  return '<span class="text-gray-400">&mdash;</span>';
+}
+
+function podLink(url) {
+  if (!url) return '<span class="text-gray-400">&mdash;</span>';
+  return `<a href="${url}" target="_blank" rel="noopener"
+    class="inline-flex items-center gap-1 text-blue-600 hover:underline text-sm font-medium">
+    &#x1F5BC; View POD</a>`;
+}
+
+function missingFlag(val) {
+  return val ? '<span class="font-semibold text-red-600">Yes</span>'
+             : '<span class="text-gray-400">&mdash;</span>';
+}
+
+// ── Search ─────────────────────────────────────────────────────────────────
+async function search() {
+  const driverId = document.getElementById('driver_id').value.trim();
+  if (!driverId) {
+    document.getElementById('driver_id').focus();
+    return;
+  }
+
+  const { from, to, label } = getDateRange();
+  showState('loading');
+
+  try {
+    const params = new URLSearchParams({ driver_id: driverId, date_from: from, date_to: to });
+    const res    = await fetch('/api/driver?' + params);
+    if (!res.ok) throw new Error(`API error ${res.status}`);
+    const { rows, count } = await res.json();
+
+    if (count === 0) {
+      document.getElementById('empty_msg').textContent =
+        `No POD records for "${driverId}" between ${fmtDate(from)} – ${fmtDate(to)}`;
+      showState('empty_result');
+      return;
+    }
+
+    // Render table
+    document.getElementById('range_label').textContent = label;
+    document.getElementById('rec_count').textContent   = `${count.toLocaleString()} records`;
+    document.getElementById('tbl_body').innerHTML = rows.map((r, i) => `
+      <tr class="${i%2?'bg-gray-50':'bg-white'} border-t border-gray-100 hover:bg-blue-50 transition text-sm">
+        <td class="px-4 py-3 font-mono text-xs font-semibold" style="color:#0053e2">${r.driver_id || '—'}</td>
+        <td class="px-4 py-3 font-mono text-xs text-gray-600">${r.sales_order_num || '—'}</td>
+        <td class="px-4 py-3 font-mono text-xs text-gray-600">${r.po_num || '—'}</td>
+        <td class="px-4 py-3 text-xs text-gray-600">${fmtDate(r.created_date)}</td>
+        <td class="px-4 py-3 text-center">${podLink(r.pod_url)}</td>
+        <td class="px-4 py-3 text-center">${resultBadge(r.ai_result)}</td>
+        <td class="px-4 py-3 text-xs">${aiInsight(r)}</td>
+        <td class="px-4 py-3 text-center text-xs">${missingFlag(r.missing_po)}</td>
+      </tr>`).join('');
+
+    showState('results');
+  } catch (err) {
+    document.getElementById('empty_msg').textContent = `Error: ${err.message}`;
+    showState('empty_result');
+  }
+}
+
+function clearSearch() {
+  document.getElementById('driver_id').value = '';
+  document.getElementById('tbl_body').innerHTML = '';
+  showState('empty');
+}
+</script>
+</body>
+</html>

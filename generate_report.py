@@ -128,6 +128,18 @@ HTML = r"""
   </div>
 </header>
 
+<!-- NAV TABS -->
+<nav class="bg-white border-b shadow-sm">
+  <div class="max-w-7xl mx-auto px-6 flex gap-0">
+    <a href="/" class="px-5 py-3 text-sm font-semibold text-blue-600 border-b-2 border-blue-600">
+      &#x1F4CA; Summary
+    </a>
+    <a href="/detail" class="px-5 py-3 text-sm font-semibold text-gray-500 hover:text-blue-600 border-b-2 border-transparent hover:border-blue-400 transition">
+      &#x1F50D; Driver Lookup
+    </a>
+  </div>
+</nav>
+
 <!-- CONTROLS -->
 <div class="bg-white border-b shadow-sm px-6 py-4">
   <div class="max-w-7xl mx-auto flex flex-wrap items-center gap-x-6 gap-y-3">
