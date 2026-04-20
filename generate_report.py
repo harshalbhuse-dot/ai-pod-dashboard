@@ -186,14 +186,30 @@ HTML = r"""
       <div class="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-1">Avg Missing Orders</div>
       <div class="text-xs text-gray-400 mb-1">per driver</div>
       <div class="text-3xl font-bold text-orange-500" id="kpi_missing">&mdash;</div>
+      <div class="mt-2 text-sm font-semibold text-orange-400" id="kpi_missing_pct">&mdash;</div>
+      <div class="text-xs text-gray-400">of total PODs</div>
     </div>
   </div>
 
-  <!-- DONUT CHART (full width, centred) -->
-  <div class="bg-white rounded-xl shadow p-5 max-w-lg mx-auto">
-    <h2 class="text-sm font-bold text-gray-700 mb-1">Unacceptable Image Breakdown</h2>
-    <p class="text-xs text-gray-400 mb-4">Why PODs were flagged as unacceptable</p>
-    <div class="chart-wrap"><canvas id="c_donut"></canvas></div>
+  <!-- CHARTS ROW -->
+  <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+    <div class="bg-white rounded-xl shadow p-5">
+      <h2 class="text-sm font-bold text-gray-700 mb-1">Unacceptable Image Breakdown</h2>
+      <p class="text-xs text-gray-400 mb-4">Why PODs were flagged as unacceptable</p>
+      <div class="chart-wrap"><canvas id="c_donut"></canvas></div>
+    </div>
+    <div class="bg-white rounded-xl shadow p-5">
+      <h2 class="text-sm font-bold text-gray-700 mb-1">Missing Order % &mdash; Daily Trend</h2>
+      <p class="text-xs text-gray-400 mb-4">Missing orders as % of total PODs per day</p>
+      <div class="chart-wrap"><canvas id="c_trend"></canvas></div>
+    </div>
+  </div>
+
+  <!-- MISSING ORDERS BY VIOLATION TYPE -->
+  <div class="bg-white rounded-xl shadow p-5">
+    <h2 class="text-sm font-bold text-gray-700 mb-1">Missing Order % by Violation Type</h2>
+    <p class="text-xs text-gray-400 mb-4">Of drivers with each violation, what % of their total PODs were missing orders?</p>
+    <div style="position:relative;height:220px"><canvas id="c_mp_by_type"></canvas></div>
   </div>
 
   <!-- DRIVER TABLE -->
@@ -337,15 +353,24 @@ function getRows() {
 function renderKPIs(rows) {
   let pods = 0, acc = 0, unacc = 0, mp = 0;
   rows.forEach(r => { pods += r.t; acc += r.a; unacc += r.u; mp += r.mp; });
-  const avgMp = rows.length > 0 ? (mp / rows.length).toFixed(2) : '—';
+  const avgMp    = rows.length > 0 ? (mp / rows.length).toFixed(2)    : '—';
+  const missingPct = pods > 0     ? (mp / pods * 100).toFixed(1) + '%' : '—';
   document.getElementById('kpi_drivers').textContent      = rows.length.toLocaleString();
   document.getElementById('kpi_pods').textContent         = pods.toLocaleString();
   document.getElementById('kpi_rate').textContent         = pods ? (acc/pods*100).toFixed(1)+'%' : '—';
   document.getElementById('kpi_unacceptable').textContent = unacc.toLocaleString();
   document.getElementById('kpi_missing').textContent      = avgMp;
+  document.getElementById('kpi_missing_pct').textContent  = missingPct;
 }
 
-// ── Donut chart ─────────────────────────────────────────────────────────────
+// ── Date helper ───────────────────────────────────────────────────────────
+function offsetToDate(off) {
+  const d = new Date(MAX_DATE);
+  d.setDate(d.getDate() - off);
+  return d.toISOString().slice(0, 10);
+}
+
+// ── Donut chart ───────────────────────────────────────────────────────────
 function renderDonut(rows) {
   const iv = rows.reduce((s,r)=>s+r.iv,0);
   const fr = rows.reduce((s,r)=>s+r.fr,0);
@@ -364,6 +389,93 @@ function renderDonut(rows) {
   };
   if(charts.donut){charts.donut.data=cfg.data;charts.donut.update();}
   else charts.donut=new Chart(document.getElementById('c_donut'),cfg);
+}
+
+// ── Missing order % daily trend ────────────────────────────────────────────
+function renderTrend() {
+  const [minOff, maxOff] = getOffsetRange();
+  const dayT  = {};
+  const dayMp = {};
+
+  for (let i = 0; i < DAILY.length; i++) {
+    const r   = DAILY[i];
+    const off = r[1];
+    if (off < minOff || off > maxOff) continue;
+    dayT[off]  = (dayT[off]  || 0) + r[2]; // total pods
+    dayMp[off] = (dayMp[off] || 0) + r[8]; // missing po
+  }
+
+  // Sort oldest → newest for left-to-right chart display
+  const offsets = Object.keys(dayT).map(Number).sort((a, b) => b - a);
+  const labels  = offsets.map(off => offsetToDate(off));
+  const data    = offsets.map(off => dayT[off] > 0
+    ? parseFloat((dayMp[off] / dayT[off] * 100).toFixed(2)) : 0);
+
+  const cfg = {
+    type: 'line',
+    data: {
+      labels,
+      datasets: [{
+        label: 'Missing Order %',
+        data,
+        borderColor: '#f97316',
+        backgroundColor: '#f9731622',
+        tension: 0.3,
+        pointRadius: offsets.length > 30 ? 2 : 4,
+        fill: true,
+      }]
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { labels: { font: { size: 11 } } } },
+      scales: {
+        x: { ticks: { font: { size: 9 }, maxRotation: 45,
+                      maxTicksLimit: 15 } },
+        y: { ticks: { font: { size: 9 },
+                      callback: v => v.toFixed(1) + '%' },
+             beginAtZero: true }
+      }
+    }
+  };
+  if (charts.trend) { charts.trend.data = cfg.data; charts.trend.update(); }
+  else charts.trend = new Chart(document.getElementById('c_trend'), cfg);
+}
+
+// ── Missing order % by violation type ─────────────────────────────────────────
+function renderMpByType(rows) {
+  function mpPct(filter) {
+    let t = 0, mp = 0;
+    rows.forEach(r => { if (filter(r)) { t += r.t; mp += r.mp; } });
+    return t > 0 ? parseFloat((mp / t * 100).toFixed(2)) : 0;
+  }
+  const labels = ['Inside Vehicle','Suspected Fraud','Profanity','All Drivers'];
+  const data   = [
+    mpPct(r => r.iv > 0),
+    mpPct(r => r.fr > 0),
+    mpPct(r => r.pr > 0),
+    mpPct(() => true),
+  ];
+  const colors = ['#0053e2','#ea1100','#ffc220','#6b7280'];
+  const cfg = {
+    type: 'bar',
+    data: { labels, datasets: [{
+      label: 'Missing Order %', data, backgroundColor: colors,
+      borderRadius: 6, borderSkipped: false,
+    }]},
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: {
+        legend: { display: false },
+        tooltip: { callbacks: { label: ctx => ` ${ctx.parsed.y.toFixed(2)}% of PODs missing` } }
+      },
+      scales: {
+        x: { ticks: { font: { size: 11 } } },
+        y: { beginAtZero: true, ticks: { font: { size: 10 }, callback: v => v.toFixed(1)+'%' } }
+      }
+    }
+  };
+  if (charts.mpByType) { charts.mpByType.data = cfg.data; charts.mpByType.update(); }
+  else charts.mpByType = new Chart(document.getElementById('c_mp_by_type'), cfg);
 }
 
 // ── Table ─────────────────────────────────────────────────────────────────
@@ -421,6 +533,8 @@ function render() {
   const rows = getRows();
   renderKPIs(rows);
   renderDonut(rows);
+  renderTrend();
+  renderMpByType(rows);
   updateSortIcons();
   renderTable(rows);
 }
