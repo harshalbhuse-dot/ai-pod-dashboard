@@ -75,7 +75,7 @@ def fetch_data(client: bigquery.Client) -> tuple[list[str], str, list[list]]:
         GROUP BY 1, 2
         ORDER BY 2 DESC, 1
     """
-    raw_rows = list(client.query(sql).result())
+    raw_rows = list(client.query(sql).result(timeout=300))
     print(f"  Fetched {len(raw_rows):,} driver-day rows")
 
     # Build driver index (sorted for stable output)
@@ -560,7 +560,7 @@ def fetch_orders(client: bigquery.Client) -> dict[str, list]:
           AND created_date IS NOT NULL
         ORDER BY DRVR_USER_ID, created_date DESC
     """
-    rows = list(client.query(sql).result())
+    rows = list(client.query(sql).result(timeout=300))
     print(f"  Fetched {len(rows):,} order rows")
 
     by_driver: dict[str, list] = {}
