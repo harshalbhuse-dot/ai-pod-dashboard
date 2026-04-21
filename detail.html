@@ -145,6 +145,7 @@ let customFrom   = null;
 let customTo     = null;
 
 // ── Shard lookup (djb2 hash — must match _shard_id() in generate_report.py) ────────
+// SCALING: at ~150k orders/day, change h & 0xFF -> h & 0x3FF and padStart(2->'3')
 function shardId(id) {
   let h = 5381;
   for (let i = 0; i < id.length; i++)

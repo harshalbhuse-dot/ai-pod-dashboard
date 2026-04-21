@@ -28,6 +28,10 @@ def _shard_id(driver_id: str) -> str:
     """Map a driver ID to one of 256 hex shards (djb2 hash, same algo as JS).
 
     Must stay in sync with shardId() in detail.html.
+
+    SCALING NOTE: 256 shards works well up to ~2x current order volume.
+    If daily orders exceed ~150k/day, bump N_SHARDS to 1024 and update
+    detail.html shardId() to use (h & 0x3FF).toString(16).padStart(3,'0').
     """
     h = 5381
     for c in driver_id:
