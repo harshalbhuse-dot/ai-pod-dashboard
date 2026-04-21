@@ -8,7 +8,7 @@ setlocal
 
 set DASHBOARD=C:\Users\H0B08S2\Documents\puppy_workspace\ai_pod_dashboard
 set LOG=%DASHBOARD%\refresh_task.log
-set PYTHON=C:\Users\H0B08S2\Documents\puppy_workspace\ai_pod_dashboard\.venv\Scripts\python.exe
+set PYTHON=%DASHBOARD%\.venv\Scripts\python.exe
 
 echo [%date% %time%] Starting daily refresh >> "%LOG%"
 
@@ -18,7 +18,7 @@ if errorlevel 1 (
     exit /b 1
 )
 
-:: 1. Regenerate the report
+:: 1. Regenerate report + driver JSON files
 echo [%date% %time%] Running generate_report.py ... >> "%LOG%"
 "%PYTHON%" generate_report.py >> "%LOG%" 2>&1
 if errorlevel 1 (
@@ -26,9 +26,9 @@ if errorlevel 1 (
     exit /b 1
 )
 
-:: 2. Git commit + push
+:: 2. Git commit + push (summary HTML + all driver JSON files)
 echo [%date% %time%] Committing and pushing ... >> "%LOG%"
-git add ai_pod_report.html >> "%LOG%" 2>&1
+git add ai_pod_report.html detail.html data\ >> "%LOG%" 2>&1
 git commit -m "chore: daily refresh %date%" >> "%LOG%" 2>&1
 git push origin main >> "%LOG%" 2>&1
 if errorlevel 1 (

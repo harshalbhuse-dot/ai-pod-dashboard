@@ -7,6 +7,7 @@ Usage:
 Output:
     ai_pod_report.html
 """
+import base64
 import json
 import sys
 from datetime import datetime, timezone
@@ -20,7 +21,16 @@ except ImportError:
     sys.exit(1)
 
 BQ_TABLE = "wmt-driver-insights.Chirag_dx.AI_POD_VERIFICATION"
-OUT_FILE = Path(__file__).parent / "ai_pod_report.html"
+OUT_FILE  = Path(__file__).parent / "ai_pod_report.html"
+DATA_DIR  = Path(__file__).parent / "data"
+
+
+def _driver_filename(driver_id: str) -> str:
+    """Deterministic, filesystem-safe filename for a driver ID.
+
+    Uses URL-safe base64 so the JS side can reproduce it with btoa().
+    """
+    return base64.urlsafe_b64encode(driver_id.encode()).decode().rstrip("=") + ".json"
 
 
 # ---------------------------------------------------------------------------
@@ -131,20 +141,16 @@ HTML = r"""
 <!-- NAV TABS -->
 <nav class="bg-white border-b shadow-sm">
   <div class="max-w-7xl mx-auto px-6 flex items-center gap-0">
-    <a href="/" class="px-5 py-3 text-sm font-semibold text-blue-600 border-b-2 border-blue-600">
+    <a href="./ai_pod_report.html"
+       class="px-5 py-3 text-sm font-semibold text-blue-600 border-b-2 border-blue-600">
       &#x1F4CA; Summary
     </a>
-    <span id="nav_lookup"></span>
+    <a href="./detail.html"
+       class="px-5 py-3 text-sm font-semibold text-gray-500 hover:text-blue-600 border-b-2 border-transparent hover:border-blue-400 transition">
+      &#x1F50D; Driver Lookup
+    </a>
   </div>
 </nav>
-<script>
-(function(){
-  const isLocal = ['localhost','127.0.0.1'].includes(location.hostname);
-  document.getElementById('nav_lookup').innerHTML = isLocal
-    ? `<a href="/detail" class="px-5 py-3 text-sm font-semibold text-gray-500 hover:text-blue-600 border-b-2 border-transparent hover:border-blue-400 transition">&#x1F50D; Driver Lookup</a>`
-    : `<span class="px-5 py-3 text-sm font-semibold text-gray-300 cursor-default" title="Driver Lookup requires the local server. Run: uvicorn main:app">&#x1F50D; Driver Lookup (local only)</span>`;
-})();
-</script>
 
 <!-- CONTROLS -->
 <div class="bg-white border-b shadow-sm px-6 py-4">
@@ -521,11 +527,81 @@ def generate_html(driver_ids: list[str], max_date: str, compact: list[list]) -> 
     )
 
 
+# ---------------------------------------------------------------------------
+# 3. BigQuery — order-level detail (last 14 days) for Driver Lookup page
+# ---------------------------------------------------------------------------
+def fetch_orders(client: bigquery.Client) -> dict[str, list]:
+    """Returns {driver_id: [[sales_order, po_num, date, pod_url, ai_result,
+                              iv, fr, pr, mp], ...]} for the last 14 days.
+
+    Rows are compact positional arrays to keep per-driver JSON files small.
+    iv/fr/pr/mp are 0/1 integers.
+    """
+    sql = f"""
+        SELECT
+          COALESCE(DRVR_USER_ID, 'UNKNOWN')                     AS driver_id,
+          COALESCE(CAST(SRC_SALES_ORDER_NUM AS STRING), '')     AS s,
+          COALESCE(CAST(PO_NUM AS STRING), '')                  AS p,
+          CAST(created_date AS STRING)                          AS d,
+          COALESCE(pod_url, '')                                 AS u,
+          COALESCE(ai_result, '')                               AS r,
+          IF(LOWER(photo_taken_inside_vehicle) = 'yes', 1, 0)  AS iv,
+          IF(LOWER(suspected_fraud)            = 'yes', 1, 0)  AS fr,
+          IF(LOWER(profanity_detected)         = 'yes', 1, 0)  AS pr,
+          COALESCE(Missing_PO, 0)                               AS mp
+        FROM `{BQ_TABLE}`
+        WHERE created_date >= DATE_SUB(CURRENT_DATE(), INTERVAL 14 DAY)
+          AND created_date IS NOT NULL
+        ORDER BY DRVR_USER_ID, created_date DESC
+    """
+    rows = list(client.query(sql).result())
+    print(f"  Fetched {len(rows):,} order rows")
+
+    by_driver: dict[str, list] = {}
+    for r in rows:
+        did = str(r.driver_id)
+        by_driver.setdefault(did, []).append([
+            str(r.s), str(r.p), str(r.d), str(r.u), str(r.r),
+            int(r.iv), int(r.fr), int(r.pr), int(r.mp),
+        ])
+    return by_driver
+
+
+def write_driver_files(by_driver: dict[str, list], generated_at: str) -> int:
+    """Write one JSON file per driver into DATA_DIR.
+
+    Each file: {"id": ..., "gen": ..., "rows": [[s, p, d, u, r, iv, fr, pr, mp], ...]}
+    Stale files (drivers outside the 14-day window) are deleted.
+    Returns number of files written.
+    """
+    DATA_DIR.mkdir(exist_ok=True)
+
+    active = {_driver_filename(d) for d in by_driver}
+    for f in DATA_DIR.glob("*.json"):
+        if f.name not in active:
+            f.unlink()
+
+    for driver_id, order_rows in by_driver.items():
+        payload = {"id": driver_id, "gen": generated_at, "rows": order_rows}
+        fname   = DATA_DIR / _driver_filename(driver_id)
+        fname.write_text(json.dumps(payload, separators=(",", ":")), encoding="utf-8")
+
+    return len(by_driver)
+
+
 if __name__ == "__main__":
     print("Connecting to BigQuery...")
     client = bigquery.Client()
+
     print("Querying AI_POD_VERIFICATION (daily grain, last 90 days)...")
     driver_ids, max_date, compact = fetch_data(client)
+
+    print("Querying order-level detail (last 14 days)...")
+    by_driver = fetch_orders(client)
+    gen_ts    = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+    n_files   = write_driver_files(by_driver, gen_ts)
+    print(f"  Wrote {n_files:,} driver files -> data/")
+
     print("Generating HTML...")
     html = generate_html(driver_ids, max_date, compact)
     OUT_FILE.write_text(html, encoding="utf-8")
