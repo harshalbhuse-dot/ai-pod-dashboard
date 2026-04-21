@@ -7,7 +7,6 @@ Usage:
 Output:
     ai_pod_report.html
 """
-import base64
 import json
 import sys
 from datetime import datetime, timezone
@@ -25,12 +24,15 @@ OUT_FILE  = Path(__file__).parent / "ai_pod_report.html"
 DATA_DIR  = Path(__file__).parent / "data"
 
 
-def _driver_filename(driver_id: str) -> str:
-    """Deterministic, filesystem-safe filename for a driver ID.
+def _shard_id(driver_id: str) -> str:
+    """Map a driver ID to one of 256 hex shards (djb2 hash, same algo as JS).
 
-    Uses URL-safe base64 so the JS side can reproduce it with btoa().
+    Must stay in sync with shardId() in detail.html.
     """
-    return base64.urlsafe_b64encode(driver_id.encode()).decode().rstrip("=") + ".json"
+    h = 5381
+    for c in driver_id:
+        h = ((h << 5) + h + ord(c)) & 0xFFFF
+    return format(h & 0xFF, "02x")
 
 
 # ---------------------------------------------------------------------------
@@ -568,23 +570,34 @@ def fetch_orders(client: bigquery.Client) -> dict[str, list]:
 
 
 def write_driver_files(by_driver: dict[str, list], generated_at: str) -> int:
-    """Write one JSON file per driver into DATA_DIR.
+    """Write 256 shard JSON files into DATA_DIR.
 
-    Each file: {"id": ..., "gen": ..., "rows": [[s, p, d, u, r, iv, fr, pr, mp], ...]}
-    Stale files (drivers outside the 14-day window) are deleted.
-    Returns number of files written.
+    Each shard file (e.g. data/a3.json) holds all drivers that hash to that shard:
+      {"gen": ..., "drivers": {driver_id: [[s,p,d,u,r,iv,fr,pr,mp], ...], ...}}
+
+    256 files is trivial for git; 16k individual files is not.
+    Returns number of unique drivers written.
     """
     DATA_DIR.mkdir(exist_ok=True)
 
-    active = {_driver_filename(d) for d in by_driver}
-    for f in DATA_DIR.glob("*.json"):
-        if f.name not in active:
-            f.unlink()
+    # Group drivers into shards
+    shards: dict[str, dict[str, list]] = {}
+    for driver_id, rows in by_driver.items():
+        sid = _shard_id(driver_id)
+        shards.setdefault(sid, {})[driver_id] = rows
 
-    for driver_id, order_rows in by_driver.items():
-        payload = {"id": driver_id, "gen": generated_at, "rows": order_rows}
-        fname   = DATA_DIR / _driver_filename(driver_id)
+    # Write each shard file
+    written_shards = set()
+    for sid, drivers in shards.items():
+        payload = {"gen": generated_at, "drivers": drivers}
+        fname   = DATA_DIR / f"{sid}.json"
         fname.write_text(json.dumps(payload, separators=(",", ":")), encoding="utf-8")
+        written_shards.add(fname.name)
+
+    # Remove stale shard files
+    for f in DATA_DIR.glob("*.json"):
+        if f.name not in written_shards:
+            f.unlink()
 
     return len(by_driver)
 

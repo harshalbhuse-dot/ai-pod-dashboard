@@ -144,10 +144,12 @@ let activePreset = 7;
 let customFrom   = null;
 let customTo     = null;
 
-// ── Filename encoding (must match Python's _driver_filename) ─────────────────
-function driverFilename(id) {
-  // URL-safe base64: replace + with -, / with _, strip =
-  return 'data/' + btoa(id).replace(/\+/g,'-').replace(/\//g,'_').replace(/=/g,'') + '.json';
+// ── Shard lookup (djb2 hash — must match _shard_id() in generate_report.py) ────────
+function shardId(id) {
+  let h = 5381;
+  for (let i = 0; i < id.length; i++)
+    h = ((h << 5) + h + id.charCodeAt(i)) & 0xFFFF;
+  return (h & 0xFF).toString(16).padStart(2, '0');
 }
 
 // ── Date helpers ────────────────────────────────────────────────────────
@@ -265,14 +267,18 @@ async function search() {
   allRows = [];
 
   try {
-    const res = await fetch(driverFilename(id));
-    if (!res.ok) {
+    const shard = shardId(id);
+    const res   = await fetch(`data/${shard}.json`);
+    if (!res.ok) throw new Error(`Shard not found (${res.status})`);
+    const data    = await res.json();
+    const drvRows = data.drivers?.[id];
+
+    if (!drvRows || drvRows.length === 0) {
       document.getElementById('nf_msg').textContent =
-        `No data found for "${id}" (last 30 days)`;
+        `No data found for "${id}" in the last 14 days`;
       show('not_found'); return;
     }
-    const data = await res.json();
-    allRows = data.rows || [];
+    allRows = drvRows;
     renderTable();
   } catch (err) {
     document.getElementById('nf_msg').textContent = `Error: ${err.message}`;
