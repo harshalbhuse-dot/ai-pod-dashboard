@@ -7,6 +7,7 @@ Usage:
 Output:
     ai_pod_report.html
 """
+from __future__ import annotations
 import json
 import sys
 from datetime import datetime, timezone
@@ -598,12 +599,67 @@ def write_driver_files(by_driver: dict[str, list], generated_at: str) -> int:
         fname.write_text(json.dumps(payload, separators=(",", ":")), encoding="utf-8")
         written_shards.add(fname.name)
 
-    # Remove stale shard files
+    # Remove stale driver shard files (keep index files)
     for f in DATA_DIR.glob("*.json"):
-        if f.name not in written_shards:
+        if f.name not in written_shards and not f.name.startswith(('so_', 'po_')):
             f.unlink()
 
     return len(by_driver)
+
+
+def write_order_indexes(by_driver: dict[str, list]) -> tuple[int, int]:
+    """Write sharded index files for Sales Order # and PO # lookups.
+
+    Creates:
+      - data/so_{hash}.json: {"orders": {"sales_order_num": "driver_id", ...}}
+      - data/po_{hash}.json: {"orders": {"po_num": "driver_id", ...}}
+
+    Returns (num_sales_orders, num_po_numbers) indexed.
+    """
+    DATA_DIR.mkdir(exist_ok=True)
+
+    # Build indexes: order_num -> driver_id
+    so_index: dict[str, dict[str, str]] = {}  # shard_id -> {so_num -> driver_id}
+    po_index: dict[str, dict[str, str]] = {}  # shard_id -> {po_num -> driver_id}
+
+    for driver_id, orders in by_driver.items():
+        for order in orders:
+            so_num = order[0]  # sales_order_num
+            po_num = order[1]  # po_num
+
+            if so_num:
+                sid = _shard_id(so_num)
+                so_index.setdefault(sid, {})[so_num] = driver_id
+
+            if po_num:
+                sid = _shard_id(po_num)
+                po_index.setdefault(sid, {})[po_num] = driver_id
+
+    # Write SO index shards
+    so_count = 0
+    for sid, orders in so_index.items():
+        fname = DATA_DIR / f"so_{sid}.json"
+        fname.write_text(json.dumps({"orders": orders}, separators=(",", ":")), encoding="utf-8")
+        so_count += len(orders)
+
+    # Write PO index shards
+    po_count = 0
+    for sid, orders in po_index.items():
+        fname = DATA_DIR / f"po_{sid}.json"
+        fname.write_text(json.dumps({"orders": orders}, separators=(",", ":")), encoding="utf-8")
+        po_count += len(orders)
+
+    # Clean up stale index files
+    valid_so = {f"so_{sid}.json" for sid in so_index}
+    valid_po = {f"po_{sid}.json" for sid in po_index}
+    for f in DATA_DIR.glob("so_*.json"):
+        if f.name not in valid_so:
+            f.unlink()
+    for f in DATA_DIR.glob("po_*.json"):
+        if f.name not in valid_po:
+            f.unlink()
+
+    return so_count, po_count
 
 
 if __name__ == "__main__":
@@ -618,6 +674,10 @@ if __name__ == "__main__":
     gen_ts    = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
     n_files   = write_driver_files(by_driver, gen_ts)
     print(f"  Wrote {n_files:,} driver files -> data/")
+
+    print("Writing order indexes for SO/PO lookup...")
+    so_count, po_count = write_order_indexes(by_driver)
+    print(f"  Indexed {so_count:,} sales orders, {po_count:,} PO numbers")
 
     print("Generating HTML...")
     html = generate_html(driver_ids, max_date, compact)
