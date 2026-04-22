@@ -487,8 +487,6 @@ function exportFeedbackCSV() {
   URL.revokeObjectURL(url);
   
   alert(`Exported ${rows.length - 1} records!`);
-  
-  alert(`Exported ${rows.length - 1} feedback records!`);
 }
 
 // Load saved feedback on page load
@@ -638,6 +636,18 @@ function clearAll() {
   clearCustom();
   show('empty');
 }
+
+// ── Check URL parameters on page load ───────────────────────────────────────
+(function checkUrlParams() {
+  const params = new URLSearchParams(window.location.search);
+  const driverId = params.get('driver');
+  
+  if (driverId) {
+    // Pre-fill the driver ID input and trigger search
+    document.getElementById('driver_id').value = driverId;
+    searchDriver();
+  }
+})();
 </script>
 </body>
 </html>

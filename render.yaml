@@ -1,0 +1,11 @@
+services:
+  - type: web
+    name: ai-pod-feedback-api
+    runtime: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn feedback_api:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: GOOGLE_APPLICATION_CREDENTIALS
+        sync: false
+    plan: free
+    autoDeploy: true

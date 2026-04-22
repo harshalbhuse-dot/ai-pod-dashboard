@@ -50,8 +50,14 @@ except ImportError as e:
     print("Make sure refresh_report.py is in the same directory as generate_report.py")
     sys.exit(1)
 
-REPO_DIR = Path(__file__).parent
-BRANCH   = "main"
+# __file__ is undefined in Jupyter / Elements notebooks — fall back to cwd.
+# Make sure your notebook kernel is started from inside the repo directory.
+try:
+    REPO_DIR = Path(__file__).parent.resolve()
+except NameError:
+    REPO_DIR = Path.cwd()
+
+BRANCH = "main"
 
 
 # ---------------------------------------------------------------------------
