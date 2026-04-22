@@ -500,31 +500,30 @@ function loadFeedbackFromLocal() {
 
 // ── API Functions ─────────────────────────────────────────────────────────
 async function checkApiHealth() {
+  const statusEl = document.getElementById('api_status');
   try {
     const res = await fetch(`${FEEDBACK_API_URL}/health`, { method: 'GET', mode: 'cors' });
     if (res.ok) {
       apiAvailable = true;
-      console.log('✅ Feedback API is available');
-      document.getElementById('api_status').innerHTML = 
-        '<span class="text-green-600 text-xs">✅ Shared feedback enabled</span>';
+      console.log('Feedback API is available');
+      if (statusEl) statusEl.innerHTML = '<span class="text-green-600 text-xs">Shared feedback enabled</span>';
     } else {
       throw new Error('API not healthy');
     }
   } catch (e) {
     apiAvailable = false;
-    console.warn('⚠️ Feedback API not available, using local storage only');
-    document.getElementById('api_status').innerHTML = 
-      '<span class="text-yellow-600 text-xs">⚠️ Local mode (run feedback_api.py for shared feedback)</span>';
+    console.warn('Feedback API not available, using local storage only:', e.message);
+    if (statusEl) statusEl.innerHTML = '<span class="text-yellow-600 text-xs">Local mode (run feedback_api.py for shared)</span>';
   }
 }
 
 async function loadFeedbackFromApi(rows) {
-  if (!apiAvailable || !rows.length) return;
-  
-  // Build keys for bulk fetch: "so1|po1,so2|po2,..."
-  const keys = rows.map(r => `${r[0]}|${r[1]}`).join(',');
+  if (!apiAvailable || !rows || !rows.length) return;
   
   try {
+    // Build keys for bulk fetch: "so1|po1,so2|po2,..."
+    const keys = rows.map(r => `${r[0]}|${r[1]}`).join(',');
+    
     const res = await fetch(`${FEEDBACK_API_URL}/feedback/bulk?keys=${encodeURIComponent(keys)}`);
     if (!res.ok) throw new Error('Bulk fetch failed');
     
@@ -555,7 +554,7 @@ async function loadFeedbackFromApi(rows) {
       renderTable();  // Re-render to show loaded feedback
     }
   } catch (e) {
-    console.warn('Failed to load feedback from API:', e);
+    console.warn('Failed to load feedback from API:', e.message);
   }
 }
 
