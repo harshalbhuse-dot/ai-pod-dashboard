@@ -352,9 +352,8 @@ function renderTable() {
       </td>
       <td class="px-4 py-3 text-center">
         ${isSubmitted 
-          ? statusBadge
-          : `<button class="btn-submit" onclick="submitFeedback('${r[0]}','${r[1]}','${r[2]}','${r[4]}')"
-               ${correctVal===undefined||correctVal===null?'disabled':''}>Submit</button>`
+          ? '<span class="badge-saved">✓ Saved</span>'
+          : `<button class="btn-submit" onclick="submitFeedback('${r[0]}','${r[1]}','${r[2]}','${r[4]}')">Submit</button>`
         }
       </td>
     </tr>`;
@@ -376,19 +375,17 @@ function updateFeedback(el, field) {
   if (field === 'correct') {
     const val = el.value;
     feedbackState[rk].correct = val === 'yes' ? true : val === 'no' ? false : null;
+    // Also save context when feedback is given
+    feedbackState[rk].driver_id = currentDriverId;
+    feedbackState[rk].slot_date = el.dataset.date;
+    feedbackState[rk].ai_result = el.dataset.result;
   } else if (field === 'notes') {
     feedbackState[rk].notes = el.value;
   }
   
-  // Save to localStorage as backup
+  // Save to localStorage immediately
   saveFeedbackToLocal();
-  
-  // Enable/disable submit button
-  const row = el.closest('tr');
-  const submitBtn = row.querySelector('.btn-submit');
-  if (submitBtn) {
-    submitBtn.disabled = feedbackState[rk].correct === null;
-  }
+  console.log('Feedback saved:', rk, feedbackState[rk]);
 }
 
 function submitFeedback(so, po, slotDate, aiResult) {
@@ -427,11 +424,14 @@ function loadFeedbackFromLocal() {
 }
 
 function exportFeedbackCSV() {
-  const rows = [['sales_order_num','po_num','driver_id','slot_date','ai_result','feedback_correct','feedback_notes','timestamp']];
+  const rows = [['sales_order_num','po_num','driver_id','slot_date','ai_result','feedback_correct','feedback_notes','submitted','timestamp']];
   
+  // Export ALL feedback (submitted or not)
   for (const [key, fb] of Object.entries(feedbackState)) {
-    if (!fb.submitted) continue; // Only export submitted feedback
     const [so, po] = key.split('_');
+    // Skip if no actual feedback given
+    if (fb.correct === null || fb.correct === undefined) continue;
+    
     rows.push([
       so, 
       po, 
@@ -440,12 +440,13 @@ function exportFeedbackCSV() {
       fb.ai_result || '',
       fb.correct === true ? 'Yes' : fb.correct === false ? 'No' : '',
       fb.notes || '',
-      fb.timestamp || ''
+      fb.submitted ? 'Yes' : 'No',
+      fb.timestamp || new Date().toISOString()
     ]);
   }
   
   if (rows.length <= 1) {
-    alert('No feedback to export yet. Submit some feedback first!');
+    alert('No feedback to export yet.\n\nTo provide feedback:\n1. Search for a driver or order\n2. Select Yes or No in the "AI Correct?" column\n3. Click Submit\n4. Then export');
     return;
   }
   
@@ -457,6 +458,8 @@ function exportFeedbackCSV() {
   a.download = `ai_pod_feedback_${new Date().toISOString().slice(0,10)}.csv`;
   a.click();
   URL.revokeObjectURL(url);
+  
+  alert(`Exported ${rows.length - 1} feedback records!`);
   
   alert(`Exported ${rows.length - 1} feedback records!`);
 }
