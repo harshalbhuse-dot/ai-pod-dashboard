@@ -185,9 +185,6 @@
 </footer>
 
 <script>
-// ── Config ──────────────────────────────────────────────────────────
-const FEEDBACK_API = 'http://localhost:8086';  // FastAPI backend
-
 // ── State ───────────────────────────────────────────────────────────
 let allRows      = [];   // all loaded rows for current search
 let activePreset = 7;
@@ -394,7 +391,7 @@ function updateFeedback(el, field) {
   }
 }
 
-async function submitFeedback(so, po, slotDate, aiResult) {
+function submitFeedback(so, po, slotDate, aiResult) {
   const rk = rowKey(so, po);
   const fb = feedbackState[rk];
   
@@ -403,42 +400,15 @@ async function submitFeedback(so, po, slotDate, aiResult) {
     return;
   }
   
-  const payload = {
-    sales_order_num: so,
-    po_num: po,
-    driver_id: currentDriverId,
-    slot_date: slotDate,
-    ai_result: aiResult,
-    feedback_correct: fb.correct,
-    feedback_notes: fb.notes || null,
-  };
+  // Save additional context
+  feedbackState[rk].driver_id = currentDriverId;
+  feedbackState[rk].slot_date = slotDate;
+  feedbackState[rk].ai_result = aiResult;
+  feedbackState[rk].submitted = true;
+  feedbackState[rk].timestamp = new Date().toISOString();
   
-  try {
-    const res = await fetch(`${FEEDBACK_API}/feedback`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
-    });
-    
-    if (!res.ok) {
-      const err = await res.json();
-      throw new Error(err.detail || 'Failed to submit feedback');
-    }
-    
-    const data = await res.json();
-    
-    // Mark as submitted
-    feedbackState[rk].submitted = true;
-    saveFeedbackToLocal();
-    
-    // Re-render to show "Saved" badge
-    renderTable();
-    
-  } catch (err) {
-    console.error('Feedback submit error:', err);
-    alert(`Error: ${err.message}\n\nFeedback saved locally. You can export to CSV later.`);
-    // Keep in local storage for later export
-  }
+  saveFeedbackToLocal();
+  renderTable();
 }
 
 function saveFeedbackToLocal() {
@@ -456,38 +426,26 @@ function loadFeedbackFromLocal() {
   }
 }
 
-async function exportFeedbackCSV() {
-  // Try to export from API first (includes all submitted feedback)
-  try {
-    const res = await fetch(`${FEEDBACK_API}/feedback/csv`);
-    if (res.ok) {
-      const blob = await res.blob();
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `ai_pod_feedback_${new Date().toISOString().slice(0,10)}.csv`;
-      a.click();
-      URL.revokeObjectURL(url);
-      return;
-    }
-  } catch (e) {
-    console.log('API export failed, falling back to local');
-  }
+function exportFeedbackCSV() {
+  const rows = [['sales_order_num','po_num','driver_id','slot_date','ai_result','feedback_correct','feedback_notes','timestamp']];
   
-  // Fallback: Export from localStorage
-  const rows = [['sales_order_num','po_num','driver_id','feedback_correct','feedback_notes','submitted']];
   for (const [key, fb] of Object.entries(feedbackState)) {
+    if (!fb.submitted) continue; // Only export submitted feedback
     const [so, po] = key.split('_');
     rows.push([
-      so, po, currentDriverId || '',
+      so, 
+      po, 
+      fb.driver_id || '',
+      fb.slot_date || '',
+      fb.ai_result || '',
       fb.correct === true ? 'Yes' : fb.correct === false ? 'No' : '',
       fb.notes || '',
-      fb.submitted ? 'Yes' : 'No'
+      fb.timestamp || ''
     ]);
   }
   
   if (rows.length <= 1) {
-    alert('No feedback to export yet.');
+    alert('No feedback to export yet. Submit some feedback first!');
     return;
   }
   
@@ -496,9 +454,11 @@ async function exportFeedbackCSV() {
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
-  a.download = `ai_pod_feedback_local_${new Date().toISOString().slice(0,10)}.csv`;
+  a.download = `ai_pod_feedback_${new Date().toISOString().slice(0,10)}.csv`;
   a.click();
   URL.revokeObjectURL(url);
+  
+  alert(`Exported ${rows.length - 1} feedback records!`);
 }
 
 // Load saved feedback on page load
