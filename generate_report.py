@@ -480,7 +480,7 @@ function renderTable(rows) {
     ? '<tr><td colspan="9" class="text-center text-gray-400 py-12">No drivers found.</td></tr>'
     : sorted.map((r,i) => `
     <tr class="${i%2?'bg-gray-50':'bg-white'} border-t border-gray-100 hover:bg-blue-50 transition">
-      <td class="px-4 py-2.5 font-mono text-xs font-semibold" style="color:#0053e2">${r.id}</td>
+      <td class="px-4 py-2.5 font-mono text-xs font-semibold"><a href="./detail.html?driver=${encodeURIComponent(r.id)}" class="hover:underline" style="color:#0053e2">${r.id}</a></td>
       <td class="px-4 py-2.5 text-right font-mono">${r.t.toLocaleString()}</td>
       <td class="px-4 py-2.5 text-right font-mono text-green-600">${r.a.toLocaleString()}</td>
       <td class="px-4 py-2.5 text-right font-mono text-red-500">${r.u.toLocaleString()}</td>
