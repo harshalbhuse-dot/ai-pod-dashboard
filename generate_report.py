@@ -539,10 +539,11 @@ def generate_html(driver_ids: list[str], max_date: str, compact: list[list]) -> 
 # ---------------------------------------------------------------------------
 def fetch_orders(client: bigquery.Client) -> dict[str, list]:
     """Returns {driver_id: [[sales_order, po_num, date, pod_url, ai_result,
-                              iv, fr, pr, mp], ...]} for the last 14 days.
+                              iv, fr, pr, mp, reason_iv], ...]} for the last 14 days.
 
     Rows are compact positional arrays to keep per-driver JSON files small.
     iv/fr/pr/mp are 0/1 integers.
+    reason_iv is the text reason for inside_vehicle flag.
     """
     sql = f"""
         SELECT
@@ -555,7 +556,8 @@ def fetch_orders(client: bigquery.Client) -> dict[str, list]:
           IF(LOWER(photo_taken_inside_vehicle) = 'yes', 1, 0)  AS iv,
           IF(LOWER(suspected_fraud)            = 'yes', 1, 0)  AS fr,
           IF(LOWER(profanity_detected)         = 'yes', 1, 0)  AS pr,
-          COALESCE(Missing_PO, 0)                               AS mp
+          COALESCE(Missing_PO, 0)                               AS mp,
+          COALESCE(reason_inside_vehicle, '')                   AS reason_iv
         FROM `{BQ_TABLE}`
         WHERE created_date >= DATE_SUB(CURRENT_DATE(), INTERVAL 14 DAY)
           AND created_date IS NOT NULL
@@ -570,6 +572,7 @@ def fetch_orders(client: bigquery.Client) -> dict[str, list]:
         by_driver.setdefault(did, []).append([
             str(r.s), str(r.p), str(r.d), str(r.u), str(r.r),
             int(r.iv), int(r.fr), int(r.pr), int(r.mp),
+            str(r.reason_iv),  # index 9: reason for inside vehicle
         ])
     return by_driver
 

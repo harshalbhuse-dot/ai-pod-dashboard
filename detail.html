@@ -35,6 +35,19 @@
     border:none;border-radius:4px;cursor:pointer;transition:opacity .15s}
   .btn-submit:hover{opacity:.85}
   .btn-submit:disabled{opacity:.5;cursor:not-allowed}
+  /* Tooltip styles */
+  .tooltip-wrap{position:relative;display:inline-block;cursor:help}
+  .tooltip-wrap .tooltip-text{visibility:hidden;width:280px;background:#1f2937;color:#fff;
+    text-align:left;border-radius:6px;padding:8px 12px;position:absolute;z-index:100;
+    bottom:125%;left:50%;transform:translateX(-50%);opacity:0;transition:opacity .2s;
+    font-size:.75rem;line-height:1.4;box-shadow:0 4px 12px rgba(0,0,0,.25)}
+  .tooltip-wrap .tooltip-text::after{content:"";position:absolute;top:100%;left:50%;
+    margin-left:-6px;border-width:6px;border-style:solid;
+    border-color:#1f2937 transparent transparent transparent}
+  .tooltip-wrap:hover .tooltip-text{visibility:visible;opacity:1}
+  .info-icon{display:inline-flex;align-items:center;justify-content:center;
+    width:16px;height:16px;border-radius:50%;background:#0053e2;color:#fff;
+    font-size:.65rem;font-weight:bold;margin-left:4px;cursor:help}
 </style>
 </head>
 <body class="bg-gray-50 min-h-screen text-gray-800">
@@ -264,11 +277,30 @@ function resultBadge(r) {
     ? '<span class="badge-ok">&#x2705; Acceptable</span>'
     : '<span class="badge-bad">&#x274C; Unacceptable</span>';
 }
-function aiInsight(iv, fr, pr) {
-  if (fr)  return 'Suspected Fraud';
-  if (iv)  return 'Inside Vehicle';
-  if (pr)  return 'Profanity';
-  return '<span class="text-gray-300">&mdash;</span>';
+function aiInsight(iv, fr, pr, reasonIv) {
+  let label = '';
+  let reason = '';
+  
+  if (fr) {
+    label = 'Suspected Fraud';
+    reason = 'This POD image was flagged for suspected fraudulent activity.';
+  } else if (iv) {
+    label = 'Inside Vehicle';
+    reason = reasonIv || 'Photo appears to be taken from inside a vehicle.';
+  } else if (pr) {
+    label = 'Profanity';
+    reason = 'This POD image contains profanity or inappropriate content.';
+  } else {
+    return '<span class="text-gray-300">&mdash;</span>';
+  }
+  
+  // Escape HTML in reason text
+  const safeReason = reason.replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  
+  return `<span class="tooltip-wrap">
+    ${label}<span class="info-icon">i</span>
+    <span class="tooltip-text"><strong>Reason:</strong><br>${safeReason}</span>
+  </span>`;
 }
 function podLink(url) {
   return url
@@ -281,7 +313,7 @@ function podLink(url) {
 // ── Render table for current date range ─────────────────────────────────────
 function renderTable() {
   const {from, to, label} = getRange();
-  // allRows = [[s,p,d,u,r,iv,fr,pr,mp], ...] ordered by date desc
+  // allRows = [[s,p,d,u,r,iv,fr,pr,mp,reason_iv], ...] ordered by date desc
   let visible = allRows.filter(r => r[2] >= from && r[2] <= to);
 
   // If searching by SO or PO, filter to matching rows
@@ -331,7 +363,7 @@ function renderTable() {
       <td class="px-4 py-3 text-xs text-gray-600">${fmtDate(r[2])}</td>
       <td class="px-4 py-3 text-center">${podLink(r[3])}</td>
       <td class="px-4 py-3 text-center">${resultBadge(r[4])}</td>
-      <td class="px-4 py-3 text-xs">${aiInsight(r[5],r[6],r[7])}</td>
+      <td class="px-4 py-3 text-xs">${aiInsight(r[5],r[6],r[7],r[9])}</td>
       <td class="px-4 py-3 text-center text-xs">
         ${r[8]?'<span class="font-semibold text-red-600">Yes</span>'
               :'<span class="text-gray-300">&mdash;</span>'}
@@ -449,7 +481,7 @@ function exportFeedbackCSV() {
   // CSV header
   const rows = [[
     'driver_id', 'sales_order_num', 'po_num', 'date', 'pod_url', 
-    'ai_result', 'ai_insight', 'missing_order', 'ai_correct', 'feedback_notes'
+    'ai_result', 'ai_insight', 'ai_insight_reason', 'missing_order', 'ai_correct', 'feedback_notes'
   ]];
   
   // Export ALL visible rows, with feedback if available
@@ -457,11 +489,19 @@ function exportFeedbackCSV() {
     const rk = rowKey(r[0], r[1]);
     const fb = feedbackState[rk] || {};
     
-    // Determine AI insight
+    // Determine AI insight and reason
     let insight = '';
-    if (r[6]) insight = 'Suspected Fraud';
-    else if (r[5]) insight = 'Inside Vehicle';
-    else if (r[7]) insight = 'Profanity';
+    let insightReason = '';
+    if (r[6]) {
+      insight = 'Suspected Fraud';
+      insightReason = 'Flagged for suspected fraudulent activity';
+    } else if (r[5]) {
+      insight = 'Inside Vehicle';
+      insightReason = r[9] || 'Photo appears to be taken from inside a vehicle';
+    } else if (r[7]) {
+      insight = 'Profanity';
+      insightReason = 'Contains profanity or inappropriate content';
+    }
     
     rows.push([
       currentDriverId || '',
@@ -471,6 +511,7 @@ function exportFeedbackCSV() {
       r[3] || '',  // pod_url
       r[4] || '',  // ai_result
       insight,     // ai_insight
+      insightReason, // ai_insight_reason
       r[8] ? 'Yes' : 'No',  // missing_order
       fb.correct === true ? 'Yes' : fb.correct === false ? 'No' : '',  // ai_correct (blank if no feedback)
       fb.notes || ''  // feedback_notes (blank if no feedback)
