@@ -424,30 +424,57 @@ function loadFeedbackFromLocal() {
 }
 
 function exportFeedbackCSV() {
-  const rows = [['sales_order_num','po_num','driver_id','slot_date','ai_result','feedback_correct','feedback_notes','submitted','timestamp']];
-  
-  // Export ALL feedback (submitted or not)
-  for (const [key, fb] of Object.entries(feedbackState)) {
-    const [so, po] = key.split('_');
-    // Skip if no actual feedback given
-    if (fb.correct === null || fb.correct === undefined) continue;
-    
-    rows.push([
-      so, 
-      po, 
-      fb.driver_id || '',
-      fb.slot_date || '',
-      fb.ai_result || '',
-      fb.correct === true ? 'Yes' : fb.correct === false ? 'No' : '',
-      fb.notes || '',
-      fb.submitted ? 'Yes' : 'No',
-      fb.timestamp || new Date().toISOString()
-    ]);
+  if (allRows.length === 0) {
+    alert('No data to export. Please search for a driver or order first.');
+    return;
   }
   
-  if (rows.length <= 1) {
-    alert('No feedback to export yet.\n\nTo provide feedback:\n1. Search for a driver or order\n2. Select Yes or No in the "AI Correct?" column\n3. Click Submit\n4. Then export');
+  const {from, to} = getRange();
+  let visible = allRows.filter(r => r[2] >= from && r[2] <= to);
+  
+  // Apply search filter if active
+  if (searchFilter) {
+    if (searchFilter.type === 'so') {
+      visible = visible.filter(r => r[0] === searchFilter.value);
+    } else if (searchFilter.type === 'po') {
+      visible = visible.filter(r => r[1] === searchFilter.value);
+    }
+  }
+  
+  if (visible.length === 0) {
+    alert('No records in current view to export.');
     return;
+  }
+  
+  // CSV header
+  const rows = [[
+    'driver_id', 'sales_order_num', 'po_num', 'date', 'pod_url', 
+    'ai_result', 'ai_insight', 'missing_order', 'ai_correct', 'feedback_notes'
+  ]];
+  
+  // Export ALL visible rows, with feedback if available
+  for (const r of visible) {
+    const rk = rowKey(r[0], r[1]);
+    const fb = feedbackState[rk] || {};
+    
+    // Determine AI insight
+    let insight = '';
+    if (r[6]) insight = 'Suspected Fraud';
+    else if (r[5]) insight = 'Inside Vehicle';
+    else if (r[7]) insight = 'Profanity';
+    
+    rows.push([
+      currentDriverId || '',
+      r[0] || '',  // sales_order_num
+      r[1] || '',  // po_num
+      r[2] || '',  // date
+      r[3] || '',  // pod_url
+      r[4] || '',  // ai_result
+      insight,     // ai_insight
+      r[8] ? 'Yes' : 'No',  // missing_order
+      fb.correct === true ? 'Yes' : fb.correct === false ? 'No' : '',  // ai_correct (blank if no feedback)
+      fb.notes || ''  // feedback_notes (blank if no feedback)
+    ]);
   }
   
   const csv = rows.map(r => r.map(c => `"${String(c).replace(/"/g,'""')}"`).join(',')).join('\n');
@@ -455,11 +482,11 @@ function exportFeedbackCSV() {
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
-  a.download = `ai_pod_feedback_${new Date().toISOString().slice(0,10)}.csv`;
+  a.download = `ai_pod_export_${currentDriverId || 'all'}_${new Date().toISOString().slice(0,10)}.csv`;
   a.click();
   URL.revokeObjectURL(url);
   
-  alert(`Exported ${rows.length - 1} feedback records!`);
+  alert(`Exported ${rows.length - 1} records!`);
   
   alert(`Exported ${rows.length - 1} feedback records!`);
 }
