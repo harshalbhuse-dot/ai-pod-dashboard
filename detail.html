@@ -148,6 +148,7 @@
     <div class="text-5xl mb-4">&#x1F50D;</div>
     <p class="text-lg font-semibold text-gray-500">Search by Driver ID, Sales Order #, or PO Number</p>
     <p class="text-sm mt-1 text-gray-400">Data covers the last 14 days &bull; filtering is instant</p>
+    <div id="api_status" class="mt-4"></div>
   </div>
 
   <div id="s_loading" class="hidden text-center py-24 text-gray-400">
@@ -198,6 +199,12 @@
 </footer>
 
 <script>
+// ── Configuration ───────────────────────────────────────────────────────────
+// Set this to your feedback API URL (run feedback_api.py on port 8086)
+// For local testing: 'http://localhost:8086'
+// For shared server: 'https://your-server.walmart.com:8086'
+const FEEDBACK_API_URL = 'http://localhost:8086';
+
 // ── State ───────────────────────────────────────────────────────────
 let allRows      = [];   // all loaded rows for current search
 let activePreset = 7;
@@ -206,6 +213,7 @@ let customTo     = null;
 let currentDriverId = null;  // track the current driver for display
 let searchFilter = null;     // {type: 'so'|'po', value: '...'} for highlighting/filtering
 let feedbackState = {};      // {rowKey: {correct: bool|null, notes: string, submitted: bool}}
+let apiAvailable = false;    // tracks if API is reachable
 
 // ── Shard lookup (djb2 hash — must match _shard_id() in generate_report.py) ────────
 function shardId(id) {
@@ -384,7 +392,7 @@ function renderTable() {
       </td>
       <td class="px-4 py-3 text-center">
         ${isSubmitted 
-          ? '<span class="badge-saved">✓ Saved</span>'
+          ? `<span class="badge-saved" title="${fb.feedback_user ? 'By: '+fb.feedback_user : ''}${fb.synced ? ' (synced)' : ' (local only)'}">✓ Saved${fb.synced ? '' : '*'}</span>`
           : `<button class="btn-submit" onclick="submitFeedback('${r[0]}','${r[1]}','${r[2]}','${r[4]}')">Submit</button>`
         }
       </td>
@@ -429,14 +437,49 @@ function submitFeedback(so, po, slotDate, aiResult) {
     return;
   }
   
-  // Save additional context
+  // Prepare feedback data
+  const feedbackData = {
+    sales_order_num: so,
+    po_num: po,
+    driver_id: currentDriverId || 'unknown',
+    slot_date: slotDate,
+    ai_result: aiResult || '',
+    feedback_correct: fb.correct,
+    feedback_notes: fb.notes || '',
+    feedback_user: 'dashboard_user'  // Could add user auth later
+  };
+  
+  // Save to local state immediately
   feedbackState[rk].driver_id = currentDriverId;
   feedbackState[rk].slot_date = slotDate;
   feedbackState[rk].ai_result = aiResult;
   feedbackState[rk].submitted = true;
   feedbackState[rk].timestamp = new Date().toISOString();
-  
   saveFeedbackToLocal();
+  
+  // Try to submit to API
+  if (apiAvailable) {
+    fetch(`${FEEDBACK_API_URL}/feedback`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(feedbackData)
+    })
+    .then(res => res.json())
+    .then(data => {
+      console.log('Feedback saved to API:', data);
+      feedbackState[rk].synced = true;
+      saveFeedbackToLocal();
+    })
+    .catch(err => {
+      console.warn('API submit failed, saved locally:', err);
+      feedbackState[rk].synced = false;
+      saveFeedbackToLocal();
+    });
+  } else {
+    console.log('API not available, saved locally only');
+    feedbackState[rk].synced = false;
+  }
+  
   renderTable();
 }
 
@@ -452,6 +495,67 @@ function loadFeedbackFromLocal() {
     } catch (e) {
       feedbackState = {};
     }
+  }
+}
+
+// ── API Functions ─────────────────────────────────────────────────────────
+async function checkApiHealth() {
+  try {
+    const res = await fetch(`${FEEDBACK_API_URL}/health`, { method: 'GET', mode: 'cors' });
+    if (res.ok) {
+      apiAvailable = true;
+      console.log('✅ Feedback API is available');
+      document.getElementById('api_status').innerHTML = 
+        '<span class="text-green-600 text-xs">✅ Shared feedback enabled</span>';
+    } else {
+      throw new Error('API not healthy');
+    }
+  } catch (e) {
+    apiAvailable = false;
+    console.warn('⚠️ Feedback API not available, using local storage only');
+    document.getElementById('api_status').innerHTML = 
+      '<span class="text-yellow-600 text-xs">⚠️ Local mode (run feedback_api.py for shared feedback)</span>';
+  }
+}
+
+async function loadFeedbackFromApi(rows) {
+  if (!apiAvailable || !rows.length) return;
+  
+  // Build keys for bulk fetch: "so1|po1,so2|po2,..."
+  const keys = rows.map(r => `${r[0]}|${r[1]}`).join(',');
+  
+  try {
+    const res = await fetch(`${FEEDBACK_API_URL}/feedback/bulk?keys=${encodeURIComponent(keys)}`);
+    if (!res.ok) throw new Error('Bulk fetch failed');
+    
+    const data = await res.json();
+    let loadedCount = 0;
+    
+    for (const [key, fb] of Object.entries(data)) {
+      if (fb.found) {
+        const rk = key.replace('|', '_');  // Convert so|po to so_po
+        feedbackState[rk] = {
+          correct: fb.feedback_correct,
+          notes: fb.feedback_notes || '',
+          submitted: true,
+          synced: true,
+          driver_id: fb.driver_id,
+          slot_date: fb.slot_date,
+          ai_result: fb.ai_result,
+          timestamp: fb.feedback_timestamp,
+          feedback_user: fb.feedback_user
+        };
+        loadedCount++;
+      }
+    }
+    
+    if (loadedCount > 0) {
+      console.log(`Loaded ${loadedCount} feedback entries from API`);
+      saveFeedbackToLocal();  // Cache locally
+      renderTable();  // Re-render to show loaded feedback
+    }
+  } catch (e) {
+    console.warn('Failed to load feedback from API:', e);
   }
 }
 
@@ -532,6 +636,7 @@ function exportFeedbackCSV() {
 
 // Load saved feedback on page load
 loadFeedbackFromLocal();
+checkApiHealth();  // Check if shared feedback API is available
 
 // ── Search by Driver ID ─────────────────────────────────────────────────────
 async function searchDriver() {
@@ -561,6 +666,7 @@ async function searchDriver() {
     }
     allRows = drvRows;
     renderTable();
+    loadFeedbackFromApi(allRows);  // Load shared feedback from API
   } catch (err) {
     document.getElementById('nf_msg').textContent = `Error: ${err.message}`;
     show('not_found');
@@ -611,6 +717,7 @@ async function searchSalesOrder() {
 
     allRows = drvRows;
     renderTable();
+    loadFeedbackFromApi(allRows);  // Load shared feedback from API
   } catch (err) {
     document.getElementById('nf_msg').textContent = `Error: ${err.message}`;
     show('not_found');
@@ -661,6 +768,7 @@ async function searchPO() {
 
     allRows = drvRows;
     renderTable();
+    loadFeedbackFromApi(allRows);  // Load shared feedback from API
   } catch (err) {
     document.getElementById('nf_msg').textContent = `Error: ${err.message}`;
     show('not_found');
